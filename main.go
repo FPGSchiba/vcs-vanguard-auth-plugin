@@ -11,20 +11,11 @@ import (
 	"time"
 )
 
-// TODO: Make this a go Module and import the state package properly
-const (
-	DistributionModeStandalone uint8 = iota // Standalone mode, no distribution all in one Server
-	DistributionModeControl                 // Only Control Server, no Voice. Used as Control-Node for Voice Servers
-	DistributionModeVoice                   // Only Voice Server, no Control. Used as Voice-Node for Control Servers
-)
-
 const version = "0.1.0"
 
 func main() {
 	var port int
-	var distributionMode int
 	flag.IntVar(&port, "port", 16057, "port to listen on")
-	flag.IntVar(&distributionMode, "distribution-mode", int(DistributionModeStandalone), "distribution mode: 0=standalone, 1=control, 2=voice")
 	flag.Parse()
 
 	listener, err := net.Listen("tcp", fmt.Sprintf("localhost:%d", port)) // Listen only on localhost as it is a plugin
@@ -44,10 +35,10 @@ func main() {
 		}),
 	)
 
-	pluginServer := NewVanguardAuthPluginServer(uint8(distributionMode))
+	pluginServer := NewVanguardAuthPluginServer()
 	pb.RegisterAuthPluginServiceServer(grpcServer, pluginServer)
 
-	log.Printf("Vanguard Auth Plugin Server v%s started on port %d with distribution mode %d\n", version, port, distributionMode)
+	log.Printf("Vanguard Auth Plugin Server v%s started on port %d\n", version, port)
 	if err := grpcServer.Serve(listener); err != nil {
 		log.Fatalf("Error serving gRPC server: %v\n", err)
 		return

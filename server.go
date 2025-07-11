@@ -15,7 +15,6 @@ import (
 type VanguardAuthPluginServer struct {
 	pb.UnimplementedAuthPluginServiceServer
 	wixCircuitBreaker *gobreaker.CircuitBreaker[*WixLoginResponse]
-	distributionMode  uint8
 	mu                sync.RWMutex
 	name              string
 	config            VanguardAuthPluginConfiguration
@@ -51,12 +50,11 @@ type WixUnitResult struct {
 	Name   string `json:"name"`
 }
 
-func NewVanguardAuthPluginServer(distributionMode uint8) *VanguardAuthPluginServer {
+func NewVanguardAuthPluginServer() *VanguardAuthPluginServer {
 	return &VanguardAuthPluginServer{
-		mu:               sync.RWMutex{},
-		distributionMode: distributionMode,
-		config:           VanguardAuthPluginConfiguration{},
-		name:             "VanguardAuthPluginServer",
+		mu:     sync.RWMutex{},
+		config: VanguardAuthPluginConfiguration{},
+		name:   "VanguardAuthPluginServer",
 		wixCircuitBreaker: gobreaker.NewCircuitBreaker[*WixLoginResponse](gobreaker.Settings{
 			Name: "WixLogin",
 			ReadyToTrip: func(counts gobreaker.Counts) bool {
@@ -65,10 +63,6 @@ func NewVanguardAuthPluginServer(distributionMode uint8) *VanguardAuthPluginServ
 			},
 		}),
 	}
-}
-
-func (s *VanguardAuthPluginServer) isControlServer() bool {
-	return s.distributionMode == DistributionModeControl
 }
 
 func (s *VanguardAuthPluginServer) Configure(ctx context.Context, request *pb.ConfigureRequest) (*pb.ConfigureResponse, error) {
