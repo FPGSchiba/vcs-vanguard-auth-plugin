@@ -11,7 +11,10 @@ import (
 	"time"
 )
 
-const version = "0.1.0"
+const (
+	version    = "0.1.0"
+	pluginName = "profile-vanguard"
+)
 
 func main() {
 	var port int

@@ -16,7 +16,6 @@ type VanguardAuthPluginServer struct {
 	pb.UnimplementedAuthPluginServiceServer
 	wixCircuitBreaker *gobreaker.CircuitBreaker[*WixLoginResponse]
 	mu                sync.RWMutex
-	name              string
 	config            VanguardAuthPluginConfiguration
 }
 
@@ -54,7 +53,6 @@ func NewVanguardAuthPluginServer() *VanguardAuthPluginServer {
 	return &VanguardAuthPluginServer{
 		mu:     sync.RWMutex{},
 		config: VanguardAuthPluginConfiguration{},
-		name:   "VanguardAuthPluginServer",
 		wixCircuitBreaker: gobreaker.NewCircuitBreaker[*WixLoginResponse](gobreaker.Settings{
 			Name: "WixLogin",
 			ReadyToTrip: func(counts gobreaker.Counts) bool {
@@ -77,9 +75,15 @@ func (s *VanguardAuthPluginServer) Configure(ctx context.Context, request *pb.Co
 			Version: version,
 		}, nil
 	}
+	if request.PluginName != pluginName {
+		return &pb.ConfigureResponse{
+			Success: false,
+			Message: fmt.Sprintf("Plugin name mismatch: expected %s, got %s", pluginName, request.PluginName),
+			Version: version,
+		}, nil
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.name = request.PluginName
 	s.config.Token = token
 	s.config.ApiKey = apiKey
 	s.config.BaseApiUrl = baseApiUrl
