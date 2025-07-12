@@ -137,6 +137,7 @@ func (s *VanguardAuthPluginServer) Login(ctx context.Context, request *pb.Client
 			Result: &pb.LoginResult{
 				AvailableRoles: availableRoles,
 				AvailableUnits: availableUnits,
+				PlayerName:     result.Data.DisplayName,
 			},
 		},
 	}, nil
