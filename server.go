@@ -5,11 +5,13 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	pb "github.com/FPGSchiba/vcs-vanguard-auth-plugin/vcsauthpb"
-	"github.com/sony/gobreaker/v2"
 	"log"
 	"net/http"
 	"sync"
+
+	pb "github.com/FPGSchiba/vcs-vanguard-auth-plugin/vcsauthpb"
+	"github.com/google/uuid"
+	"github.com/sony/gobreaker/v2"
 )
 
 type VanguardAuthPluginServer struct {
@@ -65,16 +67,7 @@ func NewVanguardAuthPluginServer() *VanguardAuthPluginServer {
 
 func (s *VanguardAuthPluginServer) Configure(ctx context.Context, request *pb.ConfigureRequest) (*pb.ConfigureResponse, error) {
 	log.Printf("Configuring VanguardAuthPluginServer with request: %+v\n", request)
-	token, tokenOk := request.Settings["token"]
-	apiKey, apiKeyOk := request.Settings["apiKey"]
-	baseApiUrl, baseApiUrlOk := request.Settings["baseApiUrl"]
-	if !tokenOk || !apiKeyOk || !baseApiUrlOk {
-		return &pb.ConfigureResponse{
-			Success: false,
-			Message: "Missing required configuration settings: token, apiKey, or baseApiUrl",
-			Version: version,
-		}, nil
-	}
+
 	if request.PluginName != pluginName {
 		return &pb.ConfigureResponse{
 			Success: false,
@@ -82,11 +75,7 @@ func (s *VanguardAuthPluginServer) Configure(ctx context.Context, request *pb.Co
 			Version: version,
 		}, nil
 	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.config.Token = token
-	s.config.ApiKey = apiKey
-	s.config.BaseApiUrl = baseApiUrl
+
 	return &pb.ConfigureResponse{
 		Success: true,
 		Message: "Configuration successful",
@@ -94,28 +83,158 @@ func (s *VanguardAuthPluginServer) Configure(ctx context.Context, request *pb.Co
 	}, nil
 }
 
-func (s *VanguardAuthPluginServer) Login(ctx context.Context, request *pb.ClientLoginRequest) (*pb.ServerLoginResponse, error) {
-	var email, password string
-	var ok bool
-	if email, ok = request.Credentials["email"]; !ok || request.Credentials["email"] == "" {
-		return &pb.ServerLoginResponse{
-			Success:     false,
-			LoginResult: &pb.ServerLoginResponse_ErrorMessage{ErrorMessage: "The 'email' field is required in credentials"},
+func (s *VanguardAuthPluginServer) GetSupportedFlows(ctx context.Context, request *pb.FlowDiscoveryRequest) (*pb.FlowDiscoveryResponse, error) {
+	log.Printf("Discovering Flows")
+	resp := &pb.FlowDiscoveryResponse{
+		Flows: []*pb.AuthFlowDefinition{
+			{
+				FlowId:      "vanguard_email_password",
+				Description: "Vanguard email password",
+				RequiredSettings: []*pb.FlowSettingDef{
+					{
+						Key:         "token",
+						Label:       "Token",
+						Description: "The API token for accessing the Vanguard Profile API",
+						Type:        "string",
+						Required:    true,
+					},
+					{
+						Key:         "apiKey",
+						Label:       "API Key",
+						Description: "The API key for accessing the Vanguard Profile API",
+						Type:        "string",
+						Required:    true,
+					},
+					{
+						Key:          "baseApiUrl",
+						Label:        "Base API URL",
+						Description:  "The base URL for the Vanguard Profile API",
+						Type:         "string",
+						Required:     true,
+						DefaultValue: "https://profile.vngd.net/_functions/",
+					},
+				},
+				Steps: []*pb.AuthStepDefinition{
+					{
+						StepId:          "email_password",
+						StepName:        "Login",
+						StepDescription: "User login with email and password",
+						StepType:        "password",
+						RequiredFields: []*pb.FieldDefinition{
+							{
+								Key:             "email",
+								Label:           "Email",
+								Description:     "The email address of the Vanguard Profile API",
+								Type:            "string",
+								Required:        true,
+								ValidationRegex: "^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$",
+							},
+							{
+								Key:         "password",
+								Label:       "Password",
+								Description: "The password of the Vanguard Profile API",
+								Type:        "password",
+								Required:    true,
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+	return resp, nil
+}
+
+func (s *VanguardAuthPluginServer) ConfigureFlow(ctx context.Context, request *pb.ConfigureFlowRequest) (*pb.ConfigureFlowResponse, error) {
+	log.Printf("Configuring flow with request: %+v\n", request)
+	if request.FlowId != "vanguard_email_password" {
+		return &pb.ConfigureFlowResponse{
+			Success: false,
+			Message: fmt.Sprintf("Flow ID mismatch: expected %s, got %s", "vanguard_email_password", request.FlowId),
 		}, nil
 	}
-	if password, ok = request.Credentials["password"]; !ok || request.Credentials["password"] == "" {
-		return &pb.ServerLoginResponse{
-			Success:     false,
-			LoginResult: &pb.ServerLoginResponse_ErrorMessage{ErrorMessage: "The 'password' field is required in credentials"},
+
+	var newConfig VanguardAuthPluginConfiguration
+	var ok bool
+
+	newConfig.Token, ok = request.Settings["token"]
+	if !ok || newConfig.Token == "" {
+		return &pb.ConfigureFlowResponse{
+			Success: false,
+			Message: "Missing or empty 'token' in settings",
+		}, nil
+	}
+	newConfig.ApiKey, ok = request.Settings["apiKey"]
+	if !ok || newConfig.ApiKey == "" {
+		return &pb.ConfigureFlowResponse{
+			Success: false,
+			Message: "Missing or empty 'apiKey' in settings",
+		}, nil
+	}
+	newConfig.BaseApiUrl, ok = request.Settings["baseApiUrl"]
+	if !ok || newConfig.BaseApiUrl == "" {
+		return &pb.ConfigureFlowResponse{
+			Success: false,
+			Message: "Missing or empty 'baseApiUrl' in settings",
+		}, nil
+	}
+
+	s.mu.Lock()
+	s.config = newConfig
+	s.mu.Unlock()
+
+	log.Printf("Flow Configuration updated successfully: %+v\n", s.config)
+	return &pb.ConfigureFlowResponse{
+		Success: true,
+		Message: "Flow configuration successful",
+	}, nil
+}
+
+func (s *VanguardAuthPluginServer) StartAuth(ctx context.Context, request *pb.StartAuthRequest) (*pb.AuthStepResponse, error) {
+	log.Printf("Starting auth flow with request: %+v\n", request)
+
+	sessionID := uuid.New().String()
+
+	if request.FlowId != "vanguard_email_password" {
+		return &pb.AuthStepResponse{
+			SessionId: sessionID,
+			Status:    pb.AuthStepStatus_AUTH_FAILED,
+			StepResult: &pb.AuthStepResponse_ErrorMessage{
+				ErrorMessage: fmt.Sprintf("Flow not supported: expected %s, got %s", "vanguard_email_password", request.FlowId),
+			},
+		}, nil
+	}
+
+	var email, password string
+	var ok bool
+	if email, ok = request.FirstStepInput["email"]; !ok || request.FirstStepInput["email"] == "" {
+		return &pb.AuthStepResponse{
+			SessionId: sessionID,
+			Status:    pb.AuthStepStatus_AUTH_FAILED,
+			StepResult: &pb.AuthStepResponse_ErrorMessage{
+				ErrorMessage: fmt.Sprintf("The 'email' field is required in the first step input"),
+			},
+		}, nil
+	}
+	if password, ok = request.FirstStepInput["password"]; !ok || request.FirstStepInput["password"] == "" {
+		return &pb.AuthStepResponse{
+			SessionId: sessionID,
+			Status:    pb.AuthStepStatus_AUTH_FAILED,
+			StepResult: &pb.AuthStepResponse_ErrorMessage{
+				ErrorMessage: fmt.Sprintf("The 'password' field is required in the first step input"),
+			},
 		}, nil
 	}
 
 	result, err := s.wixLogin(email, password)
 	if err != nil {
 		log.Printf(err.Error())
-		return &pb.ServerLoginResponse{
-			Success:     false,
-			LoginResult: &pb.ServerLoginResponse_ErrorMessage{ErrorMessage: err.Error()},
+		return &pb.AuthStepResponse{
+			SessionId: sessionID,
+			Status:    pb.AuthStepStatus_AUTH_FAILED,
+			StepResult: &pb.AuthStepResponse_ErrorMessage{
+				ErrorMessage: err.Error(),
+			},
 		}, nil
 	}
 	var availableRoles []uint32
@@ -131,10 +250,11 @@ func (s *VanguardAuthPluginServer) Login(ctx context.Context, request *pb.Client
 		})
 	}
 
-	return &pb.ServerLoginResponse{
-		Success: true,
-		LoginResult: &pb.ServerLoginResponse_Result{
-			Result: &pb.LoginResult{
+	return &pb.AuthStepResponse{
+		Status:    pb.AuthStepStatus_AUTH_COMPLETE,
+		SessionId: sessionID,
+		StepResult: &pb.AuthStepResponse_Complete{
+			Complete: &pb.LoginResult{
 				AvailableRoles: availableRoles,
 				AvailableUnits: availableUnits,
 				PlayerName:     result.Data.DisplayName,
@@ -160,7 +280,7 @@ func (s *VanguardAuthPluginServer) wixLogin(email, password string) (*WixLoginRe
 		req.Header.Set("Content-Type", "application/json")
 		req.Header.Set("Content-Length", fmt.Sprintf("%d", len(reqBody)))
 		req.Header.Set("Host", "profile.vngd.net")
-		req.Header.Set("User-Agent", "vcs-auth-plugin/1.0")
+		req.Header.Set("User-Agent", fmt.Sprintf("vcs-auth-plugin/%s", version))
 
 		resp, err := http.DefaultClient.Do(req)
 		if err != nil {

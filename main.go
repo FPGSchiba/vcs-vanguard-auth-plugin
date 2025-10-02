@@ -3,12 +3,13 @@ package main
 import (
 	"flag"
 	"fmt"
-	pb "github.com/FPGSchiba/vcs-vanguard-auth-plugin/vcsauthpb"
-	"google.golang.org/grpc"
-	"google.golang.org/grpc/keepalive"
 	"log"
 	"net"
 	"time"
+
+	pb "github.com/FPGSchiba/vcs-vanguard-auth-plugin/vcsauthpb"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/keepalive"
 )
 
 const (
