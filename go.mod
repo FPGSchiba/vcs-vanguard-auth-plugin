@@ -3,6 +3,7 @@ module github.com/FPGSchiba/vcs-vanguard-auth-plugin
 go 1.24.4
 
 require (
+	github.com/google/uuid v1.6.0
 	github.com/sony/gobreaker/v2 v2.1.0
 	google.golang.org/grpc v1.73.0
 	google.golang.org/protobuf v1.36.6

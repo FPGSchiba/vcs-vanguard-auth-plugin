@@ -179,6 +179,9 @@ func (s *VanguardAuthPluginServer) ConfigureFlow(ctx context.Context, request *p
 		}, nil
 	}
 
+	// TODO: Test configuration by making a test request to the Vanguard Profile API
+	// Only update the config if the test request is successful
+	
 	s.mu.Lock()
 	s.config = newConfig
 	s.mu.Unlock()
